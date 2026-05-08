@@ -30,8 +30,6 @@ def conectar_db():
     finally:
         if 'conn' in locals() and conn.is_connected():
             conn.close()
-
-# 3. LUEGO EL CONTROL DE SESIÓN Y FORMULARIO
 if "rol" not in st.session_state:
     st.session_state.rol = None
 
@@ -47,8 +45,7 @@ if st.session_state.rol is None:
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas")
-    st.stop()   
-
+    st.stop()
 def obtener_pacientes():
     try:
         conn = conectar_db()
