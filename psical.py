@@ -185,7 +185,10 @@ elif menu == "Pacientes y Expedientes":
                         with st.expander(f"🩺 Consulta: {row['fecha']}"):
                             st.write(f"**Diagnóstico:** {row['diagnostico']}")
 
-    # --- TAB 3: NUEVA EVALUACIÓN PSICOLÓGICA ---
+
+
+    with tab3:
+        # --- TAB 3: NUEVA EVALUACIÓN PSICOLÓGICA ---
 st.write("### 🧠 Registro de Evolución Psicológica")
 df_p = obtener_pacientes()
 
@@ -247,3 +250,5 @@ else:
         st.error(f"Error: {e}")
     finally:
         conn.close()
+        
+        
