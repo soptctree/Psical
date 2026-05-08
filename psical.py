@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
+from datetime import datetime, timedelta
 import time as t_sleep
-import pymysql
+import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
-# --- 1. CONFIGURACIÓN DE CONEXIÓN ---
+
 def conectar_db():
     return pymysql.connect(
         host="gateway01.us-east-1.prod.aws.tidbcloud.com",
@@ -15,148 +16,382 @@ def conectar_db():
         autocommit=True,
         ssl={'ca': '/etc/ssl/certs/ca-certificates.crt'}
     )
+    
+def validar_login(usuario, clave):
+    try:
+        conn = conectar_db()
+        cursor = conn.cursor() # Quitamos el argumento que daba error
+        sql = "SELECT rol FROM usuarios WHERE username = %s AND password = %s"
+        cursor.execute(sql, (usuario, clave))
+        resultado = cursor.fetchone() # Esto devuelve una tupla, ej: ('Admin',)
+        
+        if resultado:
+            return resultado[0] # Retornamos el primer elemento de la tupla (el rol)
+        return None
+    except Exception as e:
+        st.error(f"Error en login: {e}")
+        return None
+    finally:
+        # Verificamos que la conexión exista antes de intentar cerrarla
+        if 'conn' in locals() and conn:
+            conn.close()
+            
+if "rol" not in st.session_state:
+    st.session_state.rol = None
 
-# --- 2. FUNCIONES DE LÓGICA ---
+if st.session_state.rol is None:
+    st.title("🧠 Psical: Acceso")
+    with st.form("login_form"):
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.form_submit_button("Ingresar al Sistema"):
+            rol_encontrado = validar_login(u, p)
+            if rol_encontrado:
+                st.session_state.rol = rol_encontrado
+                st.rerun()
+            else:
+                st.error("Credenciales incorrectas")
+    st.stop()
+def modulo_admin_usuarios():
+    st.title("⚙️ Panel de Administración Maestro")
+    st.info(f"Sesión iniciada como: {st.session_state.usuario_nom} (Administrador)")
+
+    conn = conectar_db()
+    try:
+        # 1. VISUALIZACIÓN DE USUARIOS
+        st.write("### 👥 Usuarios en el Sistema")
+        df_users = pd.read_sql("SELECT id_usuario, username, rol FROM usuarios", conn)
+        st.dataframe(df_users, use_container_width=True)
+        
+        st.divider()
+
+        # 2. GESTIÓN DE CREDENCIALES
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("### ➕ Registrar Nuevo")
+            with st.form("nuevo_user_form"):
+                n_user = st.text_input("Nombre de Usuario:")
+                n_pass = st.text_input("Contraseña:", type="password")
+                n_rol = st.selectbox("Asignar Rol:", ["Psicologo", "Admin"])
+                if st.form_submit_button("Crear Cuenta"):
+                    if n_user and n_pass:
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (%s, %s, %s)", 
+                                     (n_user, n_pass, n_rol))
+                        conn.commit()
+                        st.success(f"Usuario {n_user} creado con éxito.")
+                        st.rerun()
+                    else:
+                        st.warning("Por favor rellena todos los campos.")
+
+        with col2:
+            st.write("### 🔑 Gestionar Contraseña")
+            with st.form("reset_pass_form"):
+                user_sel = st.selectbox("Seleccionar Usuario:", options=df_users['username'].tolist())
+                new_pass = st.text_input("Nueva Contraseña:", type="password")
+                if st.form_submit_button("Actualizar Clave"):
+                    if new_pass:
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE usuarios SET password = %s WHERE username = %s", 
+                                     (new_pass, user_sel))
+                        conn.commit()
+                        st.success(f"Clave de {user_sel} actualizada.")
+                    else:
+                        st.warning("Escribe una nueva contraseña.")
+                    
+    except Exception as e:
+        st.error(f"Error en panel admin: {e}")
+    finally:
+        if conn:
+            conn.close()
+            
+
 def obtener_pacientes():
     try:
         conn = conectar_db()
         df = pd.read_sql("SELECT id_paciente, nombre, IFNULL(cedula, 'S/N') as cedula FROM pacientes", conn)
         conn.close()
         return df
-    except: return pd.DataFrame(columns=['id_paciente', 'nombre', 'cedula'])
+    except:
+        return pd.DataFrame(columns=['id_paciente', 'nombre', 'cedula'])
 
-def verificar_disponibilidad(fecha, h_i, h_f):
+def verificar_disponibilidad(fecha, h_inicio, h_fin):
     conn = conectar_db()
-    query = f"SELECT id_cita FROM citas WHERE fecha='{fecha}' AND estado!='Cancelada'"
+    query = f"""
+    SELECT id_cita FROM citas WHERE fecha = '{fecha}' AND estado != 'Cancelada'
+    AND (('{h_inicio}' >= hora_inicio AND '{h_inicio}' < hora_fin) OR
+         ('{h_fin}' > hora_inicio AND '{h_fin}' <= hora_fin) OR
+         (hora_inicio >= '{h_inicio}' AND hora_inicio < '{h_fin}'))
+    """
     df = pd.read_sql(query, conn)
     conn.close()
-    return df.empty # Simplificado para el ejemplo, mantén tu lógica de traslape si la tienes
+    return df.empty
 
-# --- 3. CONTROL DE SESIÓN ---
-if "rol" not in st.session_state: st.session_state.rol = None
-if "usuario_nom" not in st.session_state: st.session_state.usuario_nom = ""
+# --- NAVEGACIÓN ---
+st.title("🧠 Psical: Gestión de Citas")
+menu = st.sidebar.radio("Navegación", ["Agenda Diaria", "Agendar Cita", "Pacientes y Expedientes"])
 
-if st.session_state.rol is None:
-    st.title("🧠 Psical: Acceso")
-    with st.form("login"):
-        u = st.text_input("Usuario")
-        p = st.text_input("Contraseña", type="password")
-        if st.form_submit_button("Ingresar"):
-            # Lógica de login aquí...
-            st.session_state.rol = "Admin" # Ejemplo
-            st.session_state.usuario_nom = u
-            st.rerun()
-    st.stop()
-
-# --- 4. SIDEBAR ---
-with st.sidebar:
-    st.title("📌 Menú Psical")
-    st.write(f"Usuario: **{st.session_state.usuario_nom}**")
-    opciones = ["Agenda Diaria", "Agendar Cita", "Pacientes y Expedientes"]
-    if st.session_state.rol == "Admin": opciones.append("Panel Admin")
-    menu = st.radio("Ir a:", opciones)
-
-# --- 5. MÓDULO: AGENDA DIARIA (RESTAURADO SEGÚN TU CAPTURA) ---
+# --- MÓDULO 1: AGENDA DIARIA ---
 if menu == "Agenda Diaria":
     st.subheader("📋 Control Operativo del Día")
     fecha_agenda = st.date_input("Ver día:", value=datetime.now())
     
     conn = conectar_db()
     query = f"""
-        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, p.cedula, c.estado 
+        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
         FROM citas c JOIN pacientes p ON c.id_paciente = p.id_paciente 
         WHERE c.fecha = '{fecha_agenda}' ORDER BY c.hora_inicio ASC
     """
-    df_citas = pd.read_sql(query, conn)
-    conn.close()
-
-    # --- MAPA DE DISPONIBILIDAD (Lo que se veía en tu imagen) ---
-    st.write("### 🕒 Mapa de Disponibilidad")
-    horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
-    cols = st.columns(6)
-    
-    for i, h in enumerate(horas_dia):
-        # Lógica para verificar si la hora está ocupada
-        is_ocupado = any((row['hora_inicio'] <= h < row['hora_fin']) for _, row in df_citas.iterrows() if row['estado'] != 'Cancelada')
+    try:
+        df_todas = pd.read_sql(query, conn)
+        df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        with cols[i % 6]:
-            if is_ocupado:
-                st.error(f"{h.strftime('%H:%M')}")
-            else:
-                st.success(f"{h.strftime('%H:%M')}")
+        # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
+        st.write("### 🕒 Mapa de Disponibilidad")
+        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
+        
+        # Cambiamos a 5 columnas para que en celular se vea en dos filas de 5 
+        # y no una sola lista vertical larga.
+        num_cols = 5
+        cols = st.columns(num_cols)
+        
+        for i, h in enumerate(horas_dia):
+            ocupado = False
+            if not df_activas.empty:
+                for _, r in df_activas.iterrows():
+                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                    if h >= inicio and h < fin:
+                        ocupado = True
+                        break
+            
+            # Usamos el residuo (%) de num_cols para distribuir las horas
+            with cols[i % num_cols]:
+                if ocupado: 
+                    st.error(f"{h.strftime('%H:%M')}")
+                else: 
+                    st.success(f"{h.strftime('%H:%M')}")
 
-    st.divider()
-    st.write("### ⏳ Horarios Reservados")
-    for _, row in df_citas.iterrows():
-        if row['estado'] != 'Cancelada':
-            st.warning(f"**Ocupado de {row['hora_inicio']} a {row['hora_f']}** | Paciente: {row['nombre']}")
+        st.divider()
+        
+        
 
-    st.divider()
-    st.write("### 📝 Detalle y Asistencia")
-    for _, row in df_citas.iterrows():
-        with st.expander(f"⏰ {row['hora_inicio']} - {row['hora_fin']} | 👤 {row['nombre']} ({row['estado']})"):
-            # Aquí irían tus botones de "Asistió", "Canceló", etc.
-            st.write(f"Cédula: {row['cedula']}")
 
-# --- LOS DEMÁS MÓDULOS (Agendar, Pacientes) SIGUEN AQUÍ ---
+        # --- 2. RANGOS OCUPADOS ---
+        if not df_activas.empty:
+            st.write("### ⏳ Horarios Reservados")
+            for _, row in df_activas.iterrows():
+                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                h_i, h_f = h_i_obj.strftime('%H:%M'), h_f_obj.strftime('%H:%M')
+                
+                st.warning(f"**Ocupado de {h_i} a {h_f}** | Paciente: {row['nombre']} (ID: {row['cedula']})")
+        else:
+            st.info("🎉 Todo el día está libre. No hay rangos ocupados.")
 
+        st.divider()
+
+        # --- 3. DETALLE Y ASISTENCIA (Lo que faltaba) ---
+        st.write("### 📝 Detalle y Asistencia")
+        if df_todas.empty:
+            st.info("No hay pacientes registrados para esta fecha.")
+        else:
+            for _, row in df_todas.iterrows():
+                # Formateo de hora para el título del expander
+                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+                
+                with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({row['estado']})"):
+                    st.write(f"**Cédula/ID:** {row['cedula']}")
+                    
+                    # Selección de nuevo estado
+                    lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
+                    idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
+                    
+                    nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
+                    
+                    if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                        conn.commit()
+                        st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                        t_sleep.sleep(1)
+                        st.rerun()
+
+    except Exception as e:
+        st.error(f"Error en Agenda: {e}")
+    finally:
+        conn.close()
+
+# --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita":
     st.subheader("📅 Programar Sesión")
     df_p = obtener_pacientes()
     if df_p.empty: st.warning("Crea un paciente primero.")
     else:
-        with st.form("form_agendar"):
+        with st.form("form_agendar", clear_on_submit=True):
             p_id = st.selectbox("Paciente", options=df_p['id_paciente'].tolist(),
                                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
             c1, c2, c3 = st.columns(3)
             fecha = c1.date_input("Fecha")
             h_i = c2.time_input("Inicio", value=time(7,0))
             h_f = c3.time_input("Fin", value=time(7,30))
+            
             if st.form_submit_button("Confirmar Cita"):
-                if h_i < h_f and verificar_disponibilidad(fecha, h_i, h_f):
+                if h_i >= h_f: st.error("La hora de fin debe ser posterior.")
+                elif verificar_disponibilidad(fecha, h_i, h_f):
                     conn = conectar_db(); cursor = conn.cursor()
                     cursor.execute("INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) VALUES (%s,%s,%s,%s)", (p_id, fecha, h_i, h_f))
-                    st.success("✅ Cita guardada!"); st.balloons(); t_sleep.sleep(1); st.rerun()
-                else: st.error("Horario no disponible o inválido.")
+                    conn.commit(); conn.close()
+                    st.success("✅ ¡Cita guardada!"); st.balloons()
+                    t_sleep.sleep(1.5); st.rerun()
+                else: st.error("❌ Horario ocupado.")
 
+# --- MÓDULO 3: PACIENTES Y EXPEDIENTES ---
 elif menu == "Pacientes y Expedientes":
     st.subheader("🏥 Expediente Clínico")
-    t1, t2, t3 = st.tabs(["Registrar Paciente", "Historial", "Nueva Evaluación"])
-    with t1:
+    tab1, tab2, tab3 = st.tabs(["Registrar Paciente", "Historial Médico", "Nueva Consulta"])
+
+    with tab1:
         with st.form("reg_p"):
-            n = st.text_input("Nombre Completo"); id_c = st.text_input("Cédula")
-            t = st.text_input("Teléfono"); m = st.text_input("Correo")
+            c1, c2 = st.columns(2)
+            n = c1.text_input("Nombre Completo")
+            id_c = c2.text_input("Cédula")
+            t = c1.text_input("Teléfono")
+            m = c2.text_input("Correo")
             r = st.text_area("Antecedentes")
             if st.form_submit_button("Guardar"):
                 conn = conectar_db(); cursor = conn.cursor()
-                cursor.execute("INSERT INTO pacientes (nombre, cedula, telefono, correo, referencia) VALUES (%s,%s,%s,%s,%s)", (n, id_c, t, m, r))
-                st.success("Paciente registrado.")
-    with t2:
+                cursor.execute("INSERT INTO pacientes (nombre, cedula, telefono, correo, referencia) VALUES (%s,%s,%s,%s,%s)", 
+                             (n, id_c if id_c else None, t, m, r))
+                conn.commit(); conn.close(); st.success("Registrado.")
+
+    with tab2:
+        st.write("### 📜 Historial de Sesiones Psicológicas")
         df_p = obtener_pacientes()
-        p_sel = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(), format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="h1")
-        df_h = pd.read_sql(f"SELECT * FROM historiales WHERE id_paciente={p_sel} ORDER BY fecha DESC", conectar_db())
-        for _, row in df_h.iterrows():
-            with st.expander(f"📅 Sesión: {row['fecha']}"):
-                st.write(f"**Motivo:** {row['sintomas']}")
-                st.write(f"**Evolución:** {row['diagnostico']}")
-    with t3:
-        df_p = obtener_pacientes()
-        p_id = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(), format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="e1")
+        
+        p_id_hist = st.selectbox("Seleccionar Paciente:", options=df_p['id_paciente'].tolist(),
+                                 format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", 
+                                 key="hist_psic")
+        
         conn = conectar_db()
-        c_libres = pd.read_sql(f"SELECT id_cita, fecha FROM citas WHERE id_paciente={p_id} AND estado='Asistió' AND id_cita NOT IN (SELECT id_cita FROM historiales)", conn)
-        if c_libres.empty: st.info("Sin sesiones pendientes de informe.")
+        # Seleccionamos TODOS los nuevos campos de la tabla historiales
+        query_h = f"""
+            SELECT fecha, estado_animo, nivel_ansiedad, calidad_sueno, riesgo_valoracion, 
+                   obs_conductuales, sintomas, diagnostico, recomendaciones 
+            FROM historiales WHERE id_paciente={p_id_hist} ORDER BY fecha DESC
+        """
+        try:
+            df_h = pd.read_sql(query_h, conn)
+            
+            if df_h.empty:
+                st.info("El paciente no tiene consultas registradas aún.")
+            else:
+                for _, row in df_h.iterrows():
+                    with st.expander(f"📅 Sesión: {row['fecha']}"):
+                        # --- FILA 1: INDICADORES (Visualización rápida) ---
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Ánimo", row['estado_animo'])
+                        c2.metric("Ansiedad", row['nivel_ansiedad'])
+                        c3.metric("Sueño", row['calidad_sueno'])
+                        
+                        # Alerta roja si el riesgo es alto
+                        if row['riesgo_valoracion'] in ['Alto', 'Moderado']:
+                            c4.error(f"⚠️ Riesgo: {row['riesgo_valoracion']}")
+                        else:
+                            c4.success(f"Riesgo: {row['riesgo_valoracion']}")
+
+                        st.divider()
+
+                        # --- FILA 2: CONTENIDO TEXTUAL ---
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.markdown(f"**🗣️ Motivo de Consulta:**\n{row['sintomas']}")
+                            st.markdown(f"**👁️ Observaciones:**\n{row['obs_conductuales']}")
+                        
+                        with col_b:
+                            st.markdown(f"**🧠 Intervención/Evolución:**\n{row['diagnostico']}")
+                            st.markdown(f"**📝 Tareas y Acuerdos:**\n{row['recomendaciones']}")
+                            
+        except Exception as e:
+            st.error(f"Error al cargar el historial: {e}")
+        finally:
+            conn.close()
+
+
+    with tab3:
+        # --- TAB 3: NUEVA EVALUACIÓN PSICOLÓGICA ---
+        st.write("### 🧠 Registro de Evolución Psicológica")
+        df_p = obtener_pacientes()
+
+        if df_p.empty:
+            st.warning("No hay pacientes registrados.")
         else:
-            with st.form("f_eval"):
-                cita_sel = st.selectbox("Sesión:", options=c_libres['id_cita'].tolist(), format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}")
-                col1, col2 = st.columns(2)
-                animo = col1.selectbox("Ánimo", ["Eutímico", "Ansioso", "Bajo", "Irritable"])
-                riesgo = col2.selectbox("Riesgo", ["Nulo", "Bajo", "Moderado", "Alto"])
-                motivo = st.text_area("Notas del Paciente")
-                evolucion = st.text_area("Impresión Clínica")
-                if st.form_submit_button("Guardar Evolución"):
-                    f_c = str(c_libres[c_libres['id_cita']==cita_sel]['fecha'].values[0])
-                    cursor = conn.cursor()
-                    sql = "INSERT INTO historiales (id_paciente, id_cita, fecha, estado_animo, riesgo_valoracion, sintomas, diagnostico) VALUES (%s,%s,%s,%s,%s,%s,%s)"
-                    cursor.execute(sql, (p_id, cita_sel, f_c, animo, riesgo, motivo, evolucion))
-                    st.success("✅ Guardado."); t_sleep.sleep(1); st.rerun()
-        conn.close()
+            p_id = st.selectbox(
+                "Paciente:", 
+                options=df_p['id_paciente'].tolist(),
+                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", 
+                key="cons_psic"
+            )
+            
+            conn = conectar_db()
+            # Solo mostramos citas donde asistió y no tiene historial aún
+            query_citas = f"""
+                SELECT id_cita, fecha 
+                FROM citas 
+                WHERE id_paciente={p_id} AND estado='Asistió' 
+                AND id_cita NOT IN (SELECT id_cita FROM historiales)
+            """
+            
+            try:
+                c_libres = pd.read_sql(query_citas, conn)
+                
+                if c_libres.empty:
+                    st.info("ℹ️ No hay sesiones pendientes de informe para este paciente.")
+                else:
+                    with st.form("f_psical_completo"):
+                        cita_sel = st.selectbox(
+                            "Seleccionar Sesión:", 
+                            options=c_libres['id_cita'].tolist(),
+                            format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}"
+                        )
+                        
+                        # --- FILA 1: EXAMEN MENTAL RÁPIDO ---
+                        st.markdown("#### 📊 Indicadores de la Sesión")
+                        col1, col2, col3, col4 = st.columns(4)
+                        animo = col1.selectbox("Ánimo", ["Eutímico", "Ansioso", "Bajo", "Irritable", "Lábil"])
+                        ansiedad = col2.selectbox("Ansiedad", ["Nula", "Baja", "Moderada", "Alta"])
+                        sueno = col3.selectbox("Sueño", ["Reparador", "Insomnio", "Hipersomnio"])
+                        riesgo = col4.selectbox("Riesgo", ["Nulo", "Bajo", "Moderado", "Alto"])
+                        
+                        # --- FILA 2: ÁREAS DE TEXTO ---
+                        st.markdown("---")
+                        motivo = st.text_area("Motivo de Consulta / Notas del Paciente", placeholder="¿Qué temas trajo el paciente hoy?")
+                        obs_cond = st.text_area("Observaciones Conductuales", placeholder="Apariencia, contacto visual, lenguaje no verbal...")
+                        evolucion = st.text_area("Impresión Clínica e Intervención", placeholder="Análisis técnico y técnicas aplicadas...")
+                        tareas = st.text_area("Tareas y Acuerdos", placeholder="Actividades para la siguiente sesión...")
+                        
+                        # Botón de guardado
+                        if st.form_submit_button("Guardar Evolución en Psical"):
+                            fecha_c = str(c_libres[c_libres['id_cita']==cita_sel]['fecha'].values[0])
+                            cursor = conn.cursor()
+                            
+                            sql = """INSERT INTO historiales 
+                                     (id_paciente, id_cita, fecha, estado_animo, nivel_ansiedad, calidad_sueno, 
+                                      riesgo_valoracion, obs_conductuales, sintomas, diagnostico, recomendaciones) 
+                                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+                            
+                            valores = (p_id, cita_sel, fecha_c, animo, ansiedad, sueno, riesgo, obs_cond, motivo, evolucion, tareas)
+                            
+                            cursor.execute(sql, valores)
+                            conn.commit()
+                            st.success("✅ Evolución guardada exitosamente.")
+                            t_sleep.sleep(1.5)
+                            st.rerun()
+
+            except Exception as e:
+                st.error(f"Error: {e}")
+            finally:
+                conn.close()
