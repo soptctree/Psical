@@ -61,23 +61,30 @@ if menu == "Agenda Diaria":
         
         # --- 1. MAPA DE DISPONIBILIDAD (Semáforo) ---
         st.write("### 🕒 Mapa de Disponibilidad")
-        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
-        cols = st.columns(10)
-        
-        for i, h in enumerate(horas_dia):
-            ocupado = False
-            if not df_activas.empty:
-                for _, r in df_activas.iterrows():
-                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-                    if h >= inicio and h < fin:
-                        ocupado = True
-                        break
-            with cols[i % 10]:
-                if ocupado: st.error(f"{h.strftime('%H:%M')}")
-                else: st.success(f"{h.strftime('%H:%M')}")
+horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
 
-        st.divider()
+# En celular, 10 columnas es demasiado. Usamos 4 o 5 para mayor claridad.
+num_cols = 5 
+cols = st.columns(num_cols)
+
+for i, h in enumerate(horas_dia):
+    ocupado = False
+    if not df_activas.empty:
+        for _, r in df_activas.iterrows():
+            # Validación de tipos para evitar errores de formato (como el de '0 days')
+            inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+            fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+            
+            if h >= inicio and h < fin:
+                ocupado = True
+                break
+    
+    # Distribución en las columnas disponibles
+    with cols[i % num_cols]:
+        if ocupado:
+            st.error(f"{h.strftime('%H:%M')}")
+        else:
+            st.success(f"{h.strftime('%H:%M')}")
 
         # --- 2. RANGOS OCUPADOS ---
         if not df_activas.empty:
