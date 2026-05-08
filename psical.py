@@ -5,6 +5,74 @@ from datetime import datetime, timedelta
 import time as t_sleep
 import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
+def validar_login(usuario, clave):
+    conn = conectar_db()
+    cursor = conn.cursor(dictionary=True)
+    try:
+        # Buscamos al usuario por nombre y contraseña
+        sql = "SELECT rol FROM usuarios WHERE username = %s AND password = %s"
+        cursor.execute(sql, (usuario, clave))
+        resultado = cursor.fetchone()
+        return resultado['rol'] if resultado else None
+    except Exception as e:
+        st.error(f"Error de conexión: {e}")
+        return None
+    finally:
+        conn.close()
+# --- CONTROL DE SESIÓN ---
+if "rol" not in st.session_state:
+    st.session_state.rol = None
+if "usuario_nom" not in st.session_state:
+    st.session_state.usuario_nom = ""
+
+# Si no hay nadie logueado, mostramos la pantalla de inicio
+if st.session_state.rol is None:
+    st.title("🧠 Psical: Sistema de Gestión")
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.image("https://cdn-icons-png.flaticon.com/512/3655/3655591.png") # Un icono bonito
+        
+    with col2:
+        with st.form("login_form"):
+            u = st.text_input("Usuario")
+            p = st.text_input("Contraseña", type="password")
+            if st.form_submit_button("Ingresar al Sistema"):
+                rol_encontrado = validar_login(u, p)
+                if rol_encontrado:
+                    st.session_state.rol = rol_encontrado
+                    st.session_state.usuario_nom = u
+                    st.success(f"Bienvenido {u}")
+                    st.rerun()
+                else:
+                    st.error("Usuario o clave incorrectos")
+    st.stop() # Detiene el resto del script si no está logueado
+
+# --- SI LLEGA AQUÍ, YA ESTÁ LOGUEADO ---
+with st.sidebar:
+    st.write(f"👤 Usuario: **{st.session_state.usuario_nom}**")
+    st.write(f"🔑 Rol: **{st.session_state.rol}**")
+    
+    if st.button("Cerrar Sesión"):
+        st.session_state.rol = None
+        st.rerun()
+    
+    st.divider()
+    
+    # MENÚ DINÁMICO POR ROL
+    if st.session_state.rol == "Admin":
+        menu = st.radio("Maestro:", ["Panel Admin", "Agenda Diaria", "Pacientes"])
+    else:
+        menu = st.radio("Consultorio:", ["Agenda Diaria", "Agendar Cita", "Pacientes"])
+
+# --- CONTENIDO DE LOS MÓDULOS ---
+if menu == "Panel Admin":
+    st.header("⚙️ Gestión de Usuarios")
+    # Aquí puedes poner un st.dataframe(pd.read_sql("SELECT * FROM usuarios", conn))
+    # Para que muestres mañana que tú controlas las cuentas.
+    
+# ... (Aquí sigue el resto de tu código de Agenda y Pacientes)        
+
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Psical - Gestión Clínica", layout="wide")
 
