@@ -60,8 +60,7 @@ if menu == "Agenda Diaria":
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
         # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
-        # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
-st.write("### 🕒 Mapa de Disponibilidad")
+        st.write("### 🕒 Mapa de Disponibilidad")
 
 try:
     # Definimos el rango de horas
@@ -92,6 +91,8 @@ try:
 
 except Exception as e:
     st.error(f"Error al generar el mapa de horario: {e}")
+       
+
 # El bloque 'except' arriba es lo que faltaba para quitar el SyntaxError
         
 
