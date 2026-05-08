@@ -46,58 +46,52 @@ menu = st.sidebar.radio("Navegación", ["Agenda Diaria", "Agendar Cita", "Pacien
 # --- MÓDULO 1: AGENDA DIARIA ---
 if menu == "Agenda Diaria":
     st.subheader("📋 Control Operativo del Día")
-    fecha_agenda = st.date_input("Ver día:", value=datetime.now())
+    fecha_agenda = st.date_input("📅 Seleccionar Fecha:", value=datetime.now())
     
     conn = conectar_db()
     query = f"""
-        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
+        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, p.cedula, c.estado 
         FROM citas c JOIN pacientes p ON c.id_paciente = p.id_paciente 
         WHERE c.fecha = '{fecha_agenda}' ORDER BY c.hora_inicio ASC
     """
     try:
         df_todas = pd.read_sql(query, conn)
-        df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        st.write("### 🕒 Mapa de Disponibilidad")
-        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
-        cols = st.columns(10)
-        
-        for i, h in enumerate(horas_dia):
-            ocupado = False
-            if not df_activas.empty:
-                for _, r in df_activas.iterrows():
-                    # Manejo de deltas de tiempo para asegurar comparación correcta
-                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], pd.Timedelta) else r['hora_inicio']
-                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], pd.Timedelta) else r['hora_fin']
-                    if h >= inicio and h < fin:
-                        ocupado = True
-                        break
-            with cols[i % 10]:
-                if ocupado: st.error(f"{h.strftime('%H:%M')}")
-                else: st.success(f"{h.strftime('%H:%M')}")
-
-        st.divider()
-
-        if not df_activas.empty:
-            st.write("### ⏳ Horarios Reservados")
-            for _, row in df_activas.iterrows():
-                st.warning(f"**Ocupado** | Paciente: {row['nombre']} (ID: {row['cedula']})")
-        
-        st.write("### 📑 Detalle y Asistencia")
+        st.markdown("### ⏳ Horarios Reservados")
         if df_todas.empty:
-            st.info("No hay citas registradas para esta fecha.")
+            st.info("No hay citas agendadas para este día.")
         else:
-            for index, row in df_todas.iterrows():
+            # Recreamos los cuadros de color de tu versión anterior
+            for _, row in df_todas.iterrows():
+                cedula_mostrar = row['cedula'] if row['cedula'] else "S/N"
+                st.warning(f"**Ocupado de {row['hora_inicio']} a {row['hora_fin']}** | Paciente: {row['nombre']} (ID: {cedula_mostrar})")
+            
+            st.markdown("---")
+            st.markdown("### 📝 Detalle y Asistencia")
+            for _, row in df_todas.iterrows():
+                # Formato de lista con expansor como en tu captura original
                 with st.expander(f"👤 {row['nombre']} ({row['estado']})"):
-                    nuevo_estado = st.selectbox("Actualizar:", ["Pendiente", "Asistió", "Ausente", "Cancelada"], 
-                                                index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']), key=f"st_{row['id_cita']}")
-                    if st.button("Guardar", key=f"b_{row['id_cita']}"):
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                        conn.commit()
-                        st.rerun()
-    except Exception as e: st.error(f"Error: {e}")
-    finally: conn.close()
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        nuevo_estado = st.selectbox(
+                            "Actualizar estado:", 
+                            ["Pendiente", "Asistió", "Ausente", "Cancelada"], 
+                            index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']), 
+                            key=f"upd_{row['id_cita']}"
+                        )
+                    with col2:
+                        st.write(" ") # Espaciador
+                        if st.button("Guardar", key=f"btn_{row['id_cita']}"):
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                            conn.commit()
+                            st.success("¡Cambiado!")
+                            t_sleep.sleep(1)
+                            st.rerun()
+    except Exception as e: 
+        st.error(f"Error al cargar agenda: {e}")
+    finally: 
+        conn.close()
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita":
