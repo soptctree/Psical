@@ -1,4 +1,3 @@
 streamlit==1.55.0
-pymysql
-cryptography
+mysql-connector-python
 pandas==2.3.3
