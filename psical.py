@@ -170,21 +170,56 @@ elif menu == "Pacientes y Expedientes":
                 conn.commit(); conn.close(); st.success("Registrado.")
 
     with tab2:
+        st.write("### 📜 Historial de Sesiones Psicológicas")
         df_p = obtener_pacientes()
-        if not df_p.empty:
-            sel_p = st.selectbox("Seleccionar Paciente:", options=df_p['id_paciente'].tolist(),
-                               format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
-            if sel_p:
-                conn = conectar_db()
-                query_h = f"SELECT * FROM historiales WHERE id_paciente = {sel_p} ORDER BY fecha DESC"
-                df_hist = pd.read_sql(query_h, conn)
-                conn.close()
-                if df_hist.empty: st.info("Sin historial.")
-                else:
-                    for _, row in df_hist.iterrows():
-                        with st.expander(f"🩺 Consulta: {row['fecha']}"):
-                            st.write(f"**Diagnóstico:** {row['diagnostico']}")
+        
+        p_id_hist = st.selectbox("Seleccionar Paciente:", options=df_p['id_paciente'].tolist(),
+                                 format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", 
+                                 key="hist_psic")
+        
+        conn = conectar_db()
+        # Seleccionamos TODOS los nuevos campos de la tabla historiales
+        query_h = f"""
+            SELECT fecha, estado_animo, nivel_ansiedad, calidad_sueno, riesgo_valoracion, 
+                   obs_conductuales, sintomas, diagnostico, recomendaciones 
+            FROM historiales WHERE id_paciente={p_id_hist} ORDER BY fecha DESC
+        """
+        try:
+            df_h = pd.read_sql(query_h, conn)
+            
+            if df_h.empty:
+                st.info("El paciente no tiene consultas registradas aún.")
+            else:
+                for _, row in df_h.iterrows():
+                    with st.expander(f"📅 Sesión: {row['fecha']}"):
+                        # --- FILA 1: INDICADORES (Visualización rápida) ---
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("Ánimo", row['estado_animo'])
+                        c2.metric("Ansiedad", row['nivel_ansiedad'])
+                        c3.metric("Sueño", row['calidad_sueno'])
+                        
+                        # Alerta roja si el riesgo es alto
+                        if row['riesgo_valoracion'] in ['Alto', 'Moderado']:
+                            c4.error(f"⚠️ Riesgo: {row['riesgo_valoracion']}")
+                        else:
+                            c4.success(f"Riesgo: {row['riesgo_valoracion']}")
 
+                        st.divider()
+
+                        # --- FILA 2: CONTENIDO TEXTUAL ---
+                        col_a, col_b = st.columns(2)
+                        with col_a:
+                            st.markdown(f"**🗣️ Motivo de Consulta:**\n{row['sintomas']}")
+                            st.markdown(f"**👁️ Observaciones:**\n{row['obs_conductuales']}")
+                        
+                        with col_b:
+                            st.markdown(f"**🧠 Intervención/Evolución:**\n{row['diagnostico']}")
+                            st.markdown(f"**📝 Tareas y Acuerdos:**\n{row['recomendaciones']}")
+                            
+        except Exception as e:
+            st.error(f"Error al cargar el historial: {e}")
+        finally:
+            conn.close()
 
 
     with tab3:
