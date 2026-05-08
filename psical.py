@@ -1,33 +1,36 @@
 import streamlit as st
-import mysql.connector
 import pandas as pd
 from datetime import datetime, time
 import time as t_sleep
+import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Psical - Gestión Clínica", layout="wide")
 
 def conectar_db():
-    import pymysql
     return pymysql.connect(
-        host="gateway01.us-east-1.prod.aws.tidbcloud.com", #
-        port=4000, #
-        user="469gCJra1a7NKDL.root", #
-        password="5EuBdxr4tEuzvzMp", #
-        database="psical_db", #
+        host="gateway01.us-east-1.prod.aws.tidbcloud.com",
+        port=4000,
+        user="469gCJra1a7NKDL.root",
+        password="5EuBdxr4tEuzvzMp",
+        database="psical_db",
+        autocommit=True,
         ssl={'ca': '/etc/ssl/certs/ca-certificates.crt'}
     )
 
 def obtener_pacientes():
-    conn = conectar_db()
-    df = pd.read_sql("SELECT id_paciente, nombre, IFNULL(cedula, 'S/N') as cedula FROM pacientes", conn)
-    conn.close()
-    return df
+    try:
+        conn = conectar_db()
+        df = pd.read_sql("SELECT id_paciente, nombre, IFNULL(cedula, 'S/N') as cedula FROM pacientes", conn)
+        conn.close()
+        return df
+    except:
+        return pd.DataFrame(columns=['id_paciente', 'nombre', 'cedula'])
 
 def verificar_disponibilidad(fecha, h_inicio, h_fin):
     conn = conectar_db()
     query = f"""
-    SELECT * FROM citas WHERE fecha = '{fecha}' AND estado != 'Cancelada'
+    SELECT id_cita FROM citas WHERE fecha = '{fecha}' AND estado != 'Cancelada'
     AND (('{h_inicio}' >= hora_inicio AND '{h_inicio}' < hora_fin) OR
          ('{h_fin}' > hora_inicio AND '{h_fin}' <= hora_fin) OR
          (hora_inicio >= '{h_inicio}' AND hora_inicio < '{h_fin}'))
@@ -55,7 +58,6 @@ if menu == "Agenda Diaria":
         df_todas = pd.read_sql(query, conn)
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- 1. MAPA DE DISPONIBILIDAD (Semáforo) ---
         st.write("### 🕒 Mapa de Disponibilidad")
         horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
         cols = st.columns(10)
@@ -64,8 +66,9 @@ if menu == "Agenda Diaria":
             ocupado = False
             if not df_activas.empty:
                 for _, r in df_activas.iterrows():
-                    inicio = (datetime.min + r['hora_inicio']).time()
-                    fin = (datetime.min + r['hora_fin']).time()
+                    # Manejo de deltas de tiempo para asegurar comparación correcta
+                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], pd.Timedelta) else r['hora_inicio']
+                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], pd.Timedelta) else r['hora_fin']
                     if h >= inicio and h < fin:
                         ocupado = True
                         break
@@ -75,38 +78,24 @@ if menu == "Agenda Diaria":
 
         st.divider()
 
-        # --- 2. RANGOS OCUPADOS ---
         if not df_activas.empty:
             st.write("### ⏳ Horarios Reservados")
             for _, row in df_activas.iterrows():
-                h_i = (datetime.min + row['hora_inicio']).time().strftime('%H:%M')
-                h_f = (datetime.min + row['hora_fin']).time().strftime('%H:%M')
-                st.warning(f"**Ocupado de {h_i} a {h_f}** | Paciente: {row['nombre']} (ID: {row['cedula']})")
-        else:
-            st.info("🎉 Todo el día está libre. No hay rangos ocupados.")
-
-        st.divider()
-
-        # --- 3. GESTIÓN DE CITAS ---
+                st.warning(f"**Ocupado** | Paciente: {row['nombre']} (ID: {row['cedula']})")
+        
         st.write("### 📑 Detalle y Asistencia")
         if df_todas.empty:
             st.info("No hay citas registradas para esta fecha.")
         else:
             for index, row in df_todas.iterrows():
-                h_i = (datetime.min + row['hora_inicio']).time().strftime('%H:%M')
-                h_f = (datetime.min + row['hora_fin']).time().strftime('%H:%M')
-                
-                with st.expander(f"⏰ {h_i} - {h_f} | 👤 {row['nombre']} ({row['estado']})"):
-                    c1, c2 = st.columns(2)
-                    with c1: st.write(f"Paciente ID: **{row['cedula']}**")
-                    with c2:
-                        nuevo_estado = st.selectbox("Actualizar:", ["Pendiente", "Asistió", "Ausente", "Cancelada"], 
-                                                  index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']), key=f"st_{row['id_cita']}")
-                        if st.button("Guardar", key=f"b_{row['id_cita']}"):
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                            conn.commit()
-                            st.rerun()
+                with st.expander(f"👤 {row['nombre']} ({row['estado']})"):
+                    nuevo_estado = st.selectbox("Actualizar:", ["Pendiente", "Asistió", "Ausente", "Cancelada"], 
+                                                index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']), key=f"st_{row['id_cita']}")
+                    if st.button("Guardar", key=f"b_{row['id_cita']}"):
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                        conn.commit()
+                        st.rerun()
     except Exception as e: st.error(f"Error: {e}")
     finally: conn.close()
 
@@ -114,11 +103,11 @@ if menu == "Agenda Diaria":
 elif menu == "Agendar Cita":
     st.subheader("📅 Programar Sesión")
     df_p = obtener_pacientes()
-    if df_p.empty: st.warning("Crea un paciente en la sección correspondiente.")
+    if df_p.empty: st.warning("Crea un paciente primero.")
     else:
         with st.form("form_agendar", clear_on_submit=True):
             p_id = st.selectbox("Paciente", options=df_p['id_paciente'].tolist(),
-                              format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]} ({df_p[df_p['id_paciente']==x]['cedula'].values[0]})")
+                               format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
             c1, c2, c3 = st.columns(3)
             fecha = c1.date_input("Fecha")
             h_i = c2.time_input("Inicio", value=time(7,0))
@@ -132,11 +121,11 @@ elif menu == "Agendar Cita":
                     conn.commit(); conn.close()
                     st.success("✅ ¡Cita guardada!"); st.balloons()
                     t_sleep.sleep(1.5); st.rerun()
-                else: st.error("❌ Conflicto de horario. Revisa la Agenda.")
+                else: st.error("❌ Horario ocupado.")
 
-# --- MÓDULO 3: PACIENTES Y EXPEDIENTES (UNIFICADO) ---
+# --- MÓDULO 3: PACIENTES Y EXPEDIENTES ---
 elif menu == "Pacientes y Expedientes":
-    st.subheader("🏥 Expediente Clínico Profesional")
+    st.subheader("🏥 Expediente Clínico")
     tab1, tab2, tab3 = st.tabs(["Registrar Paciente", "Historial Médico", "Nueva Consulta"])
 
     with tab1:
@@ -146,68 +135,54 @@ elif menu == "Pacientes y Expedientes":
             id_c = c2.text_input("Cédula")
             t = c1.text_input("Teléfono")
             m = c2.text_input("Correo")
-            r = st.text_area("Antecedentes / Referencia")
+            r = st.text_area("Antecedentes")
             if st.form_submit_button("Guardar"):
                 conn = conectar_db(); cursor = conn.cursor()
                 cursor.execute("INSERT INTO pacientes (nombre, cedula, telefono, correo, referencia) VALUES (%s,%s,%s,%s,%s)", 
                              (n, id_c if id_c else None, t, m, r))
-                conn.commit(); conn.close(); st.success("Registrado correctamente.")
+                conn.commit(); conn.close(); st.success("Registrado.")
 
     with tab2:
         df_p = obtener_pacientes()
         if not df_p.empty:
             sel_p = st.selectbox("Seleccionar Paciente:", options=df_p['id_paciente'].tolist(),
                                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
-            
-            conn = conectar_db()
-            query_h = f"SELECT * FROM historiales WHERE id_paciente = {sel_p} ORDER BY fecha DESC"
-            df_hist = pd.read_sql(query_h, conn)
-            
-            if df_hist.empty:
-                st.info("No hay historial clínico registrado aún.")
-            else:
-                for _, row in df_hist.iterrows():
-                    with st.expander(f"🩺 Consulta: {row['fecha']}"):
-                        v1, v2, v3, v4 = st.columns(4)
-                        v1.metric("Peso", f"{row['peso']} kg")
-                        v2.metric("Presión", row['presion_arterial'])
-                        v3.metric("Temp.", f"{row['temperatura']}°C")
-                        v4.metric("Altura", f"{row['altura']} m")
-                        st.write(f"**Síntomas:** {row['sintomas']}")
-                        st.write(f"**Diagnóstico:** {row['diagnostico']}")
-                        st.success(f"**Receta/Recomendaciones:** {row['recomendaciones']}")
-            conn.close()
+            if sel_p:
+                conn = conectar_db()
+                query_h = f"SELECT * FROM historiales WHERE id_paciente = {sel_p} ORDER BY fecha DESC"
+                df_hist = pd.read_sql(query_h, conn)
+                conn.close()
+                if df_hist.empty: st.info("Sin historial.")
+                else:
+                    for _, row in df_hist.iterrows():
+                        with st.expander(f"🩺 Consulta: {row['fecha']}"):
+                            st.write(f"**Diagnóstico:** {row['diagnostico']}")
 
     with tab3:
         st.write("### 📝 Nueva Evaluación Médica")
         df_p = obtener_pacientes()
-        p_id = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(),
-                          format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="cons_doc")
-        
-        conn = conectar_db()
-        c_libres = pd.read_sql(f"SELECT id_cita, fecha FROM citas WHERE id_paciente={p_id} AND estado='Asistió' AND id_cita NOT IN (SELECT id_cita FROM historiales)", conn)
-        
-        if c_libres.empty:
-            st.warning("No hay citas pendientes de informe. Asegúrate de marcar 'Asistió' en la Agenda.")
-        else:
-            with st.form("f_medico"):
-                cita_sel = st.selectbox("Cita del día:", options=c_libres['id_cita'].tolist(),
-                                      format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}")
-                c1, c2, c3, c4 = st.columns(4)
-                peso = c1.number_input("Peso (kg)", step=0.1)
-                presion = c2.text_input("Presión (ej: 120/80)")
-                temp = c3.number_input("Temperatura (°C)", value=36.5, step=0.1)
-                alt = c4.number_input("Altura (m)", step=0.01)
-                sin = st.text_area("Síntomas")
-                dia = st.text_area("Diagnóstico")
-                rec = st.text_area("Tratamiento / Receta")
-                
-                if st.form_submit_button("Guardar Consulta"):
-                    cursor = conn.cursor()
-                    cursor.execute("""INSERT INTO historiales (id_paciente, id_cita, fecha, peso, altura, presion_arterial, temperatura, sintomas, diagnostico, recomendaciones) 
-                                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""", 
-                                   (p_id, cita_sel, str(c_libres[c_libres['id_cita']==cita_sel]['fecha'].values[0]), peso, alt, presion, temp, sin, dia, rec))
-                    conn.commit(); conn.close()
-                    st.success("✅ Consulta guardada exitosamente.")
-                    t_sleep.sleep(1.5)
-                    st.rerun()
+        if not df_p.empty:
+            p_id = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(),
+                              format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="cons_doc")
+            
+            conn = conectar_db()
+            # Corrección: Aseguramos que la consulta SQL no falle si p_id es nulo
+            query_libres = f"SELECT id_cita, fecha FROM citas WHERE id_paciente={p_id} AND estado='Asistió' AND id_cita NOT IN (SELECT id_cita FROM historiales)"
+            c_libres = pd.read_sql(query_libres, conn)
+            
+            if c_libres.empty:
+                st.warning("No hay citas marcadas como 'Asistió' pendientes de informe.")
+            else:
+                with st.form("f_medico"):
+                    cita_sel = st.selectbox("Cita del día:", options=c_libres['id_cita'].tolist(),
+                                          format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}")
+                    peso = st.number_input("Peso (kg)", step=0.1)
+                    presion = st.text_input("Presión")
+                    dia = st.text_area("Diagnóstico")
+                    if st.form_submit_button("Guardar Consulta"):
+                        cursor = conn.cursor()
+                        cursor.execute("""INSERT INTO historiales (id_paciente, id_cita, fecha, peso, presion_arterial, diagnostico) 
+                                          VALUES (%s,%s,%s,%s,%s,%s)""", 
+                                       (p_id, cita_sel, str(datetime.now().date()), peso, presion, dia))
+                        conn.commit(); conn.close()
+                        st.success("✅ Guardado."); t_sleep.sleep(1); st.rerun()
