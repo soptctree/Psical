@@ -185,31 +185,65 @@ elif menu == "Pacientes y Expedientes":
                         with st.expander(f"🩺 Consulta: {row['fecha']}"):
                             st.write(f"**Diagnóstico:** {row['diagnostico']}")
 
-    with tab3:
-        st.write("### 📝 Nueva Evaluación Médica")
-        df_p = obtener_pacientes()
-        if not df_p.empty:
-            p_id = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(),
-                              format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="cons_doc")
-            
-            conn = conectar_db()
-            # Corrección: Aseguramos que la consulta SQL no falle si p_id es nulo
-            query_libres = f"SELECT id_cita, fecha FROM citas WHERE id_paciente={p_id} AND estado='Asistió' AND id_cita NOT IN (SELECT id_cita FROM historiales)"
-            c_libres = pd.read_sql(query_libres, conn)
-            
-            if c_libres.empty:
-                st.warning("No hay citas marcadas como 'Asistió' pendientes de informe.")
-            else:
-                with st.form("f_medico"):
-                    cita_sel = st.selectbox("Cita del día:", options=c_libres['id_cita'].tolist(),
-                                          format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}")
-                    peso = st.number_input("Peso (kg)", step=0.1)
-                    presion = st.text_input("Presión")
-                    dia = st.text_area("Diagnóstico")
-                    if st.form_submit_button("Guardar Consulta"):
-                        cursor = conn.cursor()
-                        cursor.execute("""INSERT INTO historiales (id_paciente, id_cita, fecha, peso, presion_arterial, diagnostico) 
-                                          VALUES (%s,%s,%s,%s,%s,%s)""", 
-                                       (p_id, cita_sel, str(datetime.now().date()), peso, presion, dia))
-                        conn.commit(); conn.close()
-                        st.success("✅ Guardado."); t_sleep.sleep(1); st.rerun()
+    # --- TAB 3: NUEVA EVALUACIÓN PSICOLÓGICA ---
+st.write("### 🧠 Registro de Evolución Psicológica")
+df_p = obtener_pacientes()
+
+if df_p.empty:
+    st.warning("No hay pacientes registrados.")
+else:
+    p_id = st.selectbox("Paciente:", options=df_p['id_paciente'].tolist(),
+                        format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}", key="cons_psic")
+    
+    conn = conectar_db()
+    # Solo mostramos citas donde asistió y no tiene historial aún
+    query_citas = f"SELECT id_cita, fecha FROM citas WHERE id_paciente={p_id} AND estado='Asistió' AND id_cita NOT IN (SELECT id_cita FROM historiales)"
+    
+    try:
+        c_libres = pd.read_sql(query_citas, conn)
+        
+        if c_libres.empty:
+            st.info("ℹ️ No hay sesiones pendientes de informe para este paciente.")
+        else:
+            with st.form("f_psical_completo"):
+                cita_sel = st.selectbox("Seleccionar Sesión:", options=c_libres['id_cita'].tolist(),
+                                      format_func=lambda x: f"Fecha: {c_libres[c_libres['id_cita']==x]['fecha'].values[0]}")
+                
+                # --- FILA 1: EXAMEN MENTAL RÁPIDO ---
+                st.markdown("#### 📊 Indicadores de la Sesión")
+                col1, col2, col3, col4 = st.columns(4)
+                animo = col1.selectbox("Ánimo", ["Eutímico", "Ansioso", "Bajo", "Irritable", "Lábil"])
+                ansiedad = col2.selectbox("Ansiedad", ["Nula", "Baja", "Moderada", "Alta"])
+                sueno = col3.selectbox("Sueño", ["Reparador", "Insomnio", "Hipersomnio"])
+                riesgo = col4.selectbox("Riesgo", ["Nulo", "Bajo", "Moderado", "Alto"])
+                
+                # --- FILA 2: ÁREAS DE TEXTO ---
+                st.markdown("---")
+                motivo = st.text_area("Motivo de Consulta / Notas del Paciente", placeholder="¿Qué temas trajo el paciente hoy?")
+                obs_cond = st.text_area("Observaciones Conductuales", placeholder="Apariencia, contacto visual, lenguaje no verbal...")
+                evolucion = st.text_area("Impresión Clínica e Intervención", placeholder="Análisis técnico y técnicas aplicadas...")
+                tareas = st.text_area("Tareas y Acuerdos", placeholder="Actividades para la siguiente sesión...")
+                
+                # Botón de guardado
+                if st.form_submit_button("Guardar Evolución en Psical"):
+                    fecha_c = str(c_libres[c_libres['id_cita']==cita_sel]['fecha'].values[0])
+                    cursor = conn.cursor()
+                    
+                    sql = """INSERT INTO historiales 
+                             (id_paciente, id_cita, fecha, estado_animo, nivel_ansiedad, calidad_sueno, 
+                              riesgo_valoracion, obs_conductuales, sintomas, diagnostico, recomendaciones) 
+                             VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
+                    
+                    # Mapeamos 'sintomas' como motivo y 'diagnostico' como evolucion
+                    valores = (p_id, cita_sel, fecha_c, animo, ansiedad, sueno, riesgo, obs_cond, motivo, evolucion, tareas)
+                    
+                    cursor.execute(sql, valores)
+                    conn.commit()
+                    st.success("✅ Evolución guardada exitosamente.")
+                    t_sleep.sleep(1.5)
+                    st.rerun()
+
+    except Exception as e:
+        st.error(f"Error: {e}")
+    finally:
+        conn.close()
