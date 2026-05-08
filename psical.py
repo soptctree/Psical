@@ -59,32 +59,39 @@ if menu == "Agenda Diaria":
         df_todas = pd.read_sql(query, conn)
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- 1. MAPA DE DISPONIBILIDAD (Semáforo) ---
-        st.write("### 🕒 Mapa de Disponibilidad")
-horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
+        # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
+st.write("### 🕒 Mapa de Disponibilidad")
 
-# En celular, 10 columnas es demasiado. Usamos 4 o 5 para mayor claridad.
-num_cols = 5 
-cols = st.columns(num_cols)
-
-for i, h in enumerate(horas_dia):
-    ocupado = False
-    if not df_activas.empty:
-        for _, r in df_activas.iterrows():
-            # Validación de tipos para evitar errores de formato (como el de '0 days')
-            inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-            fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-            
-            if h >= inicio and h < fin:
-                ocupado = True
-                break
+try:
+    # Definimos el rango de horas
+    horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
     
-    # Distribución en las columnas disponibles
-    with cols[i % num_cols]:
-        if ocupado:
-            st.error(f"{h.strftime('%H:%M')}")
-        else:
-            st.success(f"{h.strftime('%H:%M')}")
+    # Usamos 5 columnas para que en móvil no se amontonen tanto
+    num_cols = 5 
+    cols = st.columns(num_cols)
+    
+    for i, h in enumerate(horas_dia):
+        ocupado = False
+        if not df_activas.empty:
+            for _, r in df_activas.iterrows():
+                # Evitamos el error de '0 days' con validación de tipo
+                inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                
+                if h >= inicio and h < fin:
+                    ocupado = True
+                    break
+        
+        # Dibujamos el bloque en la columna correspondiente
+        with cols[i % num_cols]:
+            if ocupado:
+                st.error(f"{h.strftime('%H:%M')}")
+            else:
+                st.success(f"{h.strftime('%H:%M')}")
+
+except Exception as e:
+    st.error(f"Error al generar el mapa de horario: {e}")
+# El bloque 'except' arriba es lo que faltaba para quitar el SyntaxError
 
         # --- 2. RANGOS OCUPADOS ---
         if not df_activas.empty:
