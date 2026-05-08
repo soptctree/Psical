@@ -46,9 +46,10 @@ menu = st.sidebar.radio("Navegación", ["Agenda Diaria", "Agendar Cita", "Pacien
 # --- MÓDULO 1: AGENDA DIARIA ---
 if menu == "Agenda Diaria":
     st.subheader("📋 Control Operativo del Día")
-    fecha_agenda = st.date_input("📅 Seleccionar Fecha:", value=datetime.now())
+    fecha_agenda = st.date_input("📅 Ver agenda del día:", value=datetime.now())
     
     conn = conectar_db()
+    # Traemos los datos necesarios para el visual
     query = f"""
         SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, p.cedula, c.estado 
         FROM citas c JOIN pacientes p ON c.id_paciente = p.id_paciente 
@@ -61,36 +62,42 @@ if menu == "Agenda Diaria":
         if df_todas.empty:
             st.info("No hay citas agendadas para este día.")
         else:
-            # Recreamos los cuadros de color de tu versión anterior
+            # --- AQUÍ RECUPERAMOS TU DISEÑO VISUAL ---
             for _, row in df_todas.iterrows():
-                cedula_mostrar = row['cedula'] if row['cedula'] else "S/N"
-                st.warning(f"**Ocupado de {row['hora_inicio']} a {row['hora_fin']}** | Paciente: {row['nombre']} (ID: {cedula_mostrar})")
+                # Formateamos a HH:MM para que se vea limpio como antes
+                h_inicio = str(row['hora_inicio'])[:5] 
+                h_fin = str(row['hora_fin'])[:5]
+                id_p = row['cedula'] if row['cedula'] else "S/N"
+                
+                # El cuadro amarillo clásico de tu app
+                st.warning(f"**Ocupado de {h_inicio} a {h_fin}** | Paciente: {row['nombre']} (ID: {id_p})")
             
             st.markdown("---")
             st.markdown("### 📝 Detalle y Asistencia")
+            # Lista desplegable para marcar quién llegó y quién no
             for _, row in df_todas.iterrows():
-                # Formato de lista con expansor como en tu captura original
-                with st.expander(f"👤 {row['nombre']} ({row['estado']})"):
-                    col1, col2 = st.columns([3, 1])
-                    with col1:
-                        nuevo_estado = st.selectbox(
-                            "Actualizar estado:", 
-                            ["Pendiente", "Asistió", "Ausente", "Cancelada"], 
-                            index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']), 
-                            key=f"upd_{row['id_cita']}"
+                with st.expander(f"👤 {row['nombre']} - Estado actual: {row['estado']}"):
+                    col_estado, col_boton = st.columns([3, 1])
+                    with col_estado:
+                        nuevo_e = st.selectbox(
+                            "Cambiar a:", 
+                            ["Pendiente", "Asistió", "Ausente", "Cancelada"],
+                            index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']),
+                            key=f"st_{row['id_cita']}"
                         )
-                    with col2:
-                        st.write(" ") # Espaciador
+                    with col_boton:
+                        st.write(" ") # Espacio para alinear
                         if st.button("Guardar", key=f"btn_{row['id_cita']}"):
                             cursor = conn.cursor()
-                            cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                            cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_e, row['id_cita']))
                             conn.commit()
-                            st.success("¡Cambiado!")
+                            st.success("Actualizado")
                             t_sleep.sleep(1)
                             st.rerun()
-    except Exception as e: 
-        st.error(f"Error al cargar agenda: {e}")
-    finally: 
+                            
+    except Exception as e:
+        st.error(f"Error visualizando agenda: {e}")
+    finally:
         conn.close()
 
 # --- MÓDULO 2: AGENDAR CITA ---
