@@ -16,7 +16,8 @@ def conectar_db():
         autocommit=True,
         ssl={'ca': '/etc/ssl/certs/ca-certificates.crt'}
     )
- def validar_login(usuario, clave):
+    
+def validar_login(usuario, clave):
     try:
         conn = conectar_db() # Ahora sí la encontrará
         cursor = conn.cursor(dictionary=True)
