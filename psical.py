@@ -61,39 +61,24 @@ if menu == "Agenda Diaria":
         
         # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
         st.write("### 🕒 Mapa de Disponibilidad")
-
-try:
-    # Definimos el rango de horas
-    horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
-    
-    # Usamos 5 columnas para que en móvil no se amontonen tanto
-    num_cols = 5 
-    cols = st.columns(num_cols)
-    
-    for i, h in enumerate(horas_dia):
-        ocupado = False
-        if not df_activas.empty:
-            for _, r in df_activas.iterrows():
-                # Evitamos el error de '0 days' con validación de tipo
-                inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-                fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-                
-                if h >= inicio and h < fin:
-                    ocupado = True
-                    break
+        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
+        cols = st.columns(10)
         
-        # Dibujamos el bloque en la columna correspondiente
-        with cols[i % num_cols]:
-            if ocupado:
-                st.error(f"{h.strftime('%H:%M')}")
-            else:
-                st.success(f"{h.strftime('%H:%M')}")
+        for i, h in enumerate(horas_dia):
+            ocupado = False
+            if not df_activas.empty:
+                for _, r in df_activas.iterrows():
+                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                    if h >= inicio and h < fin:
+                        ocupado = True
+                        break
+            with cols[i % 10]:
+                if ocupado: st.error(f"{h.strftime('%H:%M')}")
+                else: st.success(f"{h.strftime('%H:%M')}")
 
-except Exception as e:
-    st.error(f"Error al generar el mapa de horario: {e}")
-       
-
-# El bloque 'except' arriba es lo que faltaba para quitar el SyntaxError
+        st.divider()
+        
         
 
 
