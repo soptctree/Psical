@@ -46,57 +46,57 @@ menu = st.sidebar.radio("Navegación", ["Agenda Diaria", "Agendar Cita", "Pacien
 # --- MÓDULO 1: AGENDA DIARIA ---
 if menu == "Agenda Diaria":
     st.subheader("📋 Control Operativo del Día")
-    fecha_agenda = st.date_input("📅 Ver agenda del día:", value=datetime.now())
+    fecha_agenda = st.date_input("Ver día:", value=datetime.now())
     
     conn = conectar_db()
-    # Traemos los datos necesarios para el visual
     query = f"""
-        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, p.cedula, c.estado 
+        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
         FROM citas c JOIN pacientes p ON c.id_paciente = p.id_paciente 
         WHERE c.fecha = '{fecha_agenda}' ORDER BY c.hora_inicio ASC
     """
     try:
         df_todas = pd.read_sql(query, conn)
+        # Filtramos para el visual de disponibilidad
+        df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        st.markdown("### ⏳ Horarios Reservados")
-        if df_todas.empty:
-            st.info("No hay citas agendadas para este día.")
-        else:
-            # --- AQUÍ RECUPERAMOS TU DISEÑO VISUAL ---
-            for _, row in df_todas.iterrows():
-                # Formateamos a HH:MM para que se vea limpio como antes
-                h_inicio = str(row['hora_inicio'])[:5] 
-                h_fin = str(row['hora_fin'])[:5]
-                id_p = row['cedula'] if row['cedula'] else "S/N"
+        # --- 1. MAPA DE DISPONIBILIDAD (Semáforo) ---
+        st.write("### 🕒 Mapa de Disponibilidad")
+        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
+        cols = st.columns(10)
+        
+        for i, h in enumerate(horas_dia):
+            ocupado = False
+            if not df_activas.empty:
+                for _, r in df_activas.iterrows():
+                    # AJUSTE SEGURO: Convertimos a string y luego a objeto time para evitar el "0 day"
+                    inicio = datetime.strptime(str(r['hora_inicio']), '%H:%M:%S').time() if len(str(r['hora_inicio'])) > 5 else r['hora_inicio']
+                    fin = datetime.strptime(str(r['hora_fin']), '%H:%M:%S').time() if len(str(r['hora_fin'])) > 5 else r['hora_fin']
+                    
+                    if h >= inicio and h < fin:
+                        ocupado = True
+                        break
+            with cols[i % 10]:
+                if ocupado: st.error(f"{h.strftime('%H:%M')}")
+                else: st.success(f"{h.strftime('%H:%M')}")
+
+        st.divider()
+
+        # --- 2. RANGOS OCUPADOS ---
+        if not df_activas.empty:
+            st.write("### ⏳ Horarios Reservados")
+            for _, row in df_activas.iterrows():
+                # AJUSTE SEGURO para el formato visual
+                h_i = datetime.strptime(str(row['hora_inicio']), '%H:%M:%S').time().strftime('%H:%M') if len(str(row['hora_inicio'])) > 5 else str(row['hora_inicio'])[:5]
+                h_f = datetime.strptime(str(row['hora_fin']), '%H:%M:%S').time().strftime('%H:%M') if len(str(row['hora_fin'])) > 5 else str(row['hora_fin'])[:5]
                 
-                # El cuadro amarillo clásico de tu app
-                st.warning(f"**Ocupado de {h_inicio} a {h_fin}** | Paciente: {row['nombre']} (ID: {id_p})")
-            
-            st.markdown("---")
-            st.markdown("### 📝 Detalle y Asistencia")
-            # Lista desplegable para marcar quién llegó y quién no
-            for _, row in df_todas.iterrows():
-                with st.expander(f"👤 {row['nombre']} - Estado actual: {row['estado']}"):
-                    col_estado, col_boton = st.columns([3, 1])
-                    with col_estado:
-                        nuevo_e = st.selectbox(
-                            "Cambiar a:", 
-                            ["Pendiente", "Asistió", "Ausente", "Cancelada"],
-                            index=["Pendiente", "Asistió", "Ausente", "Cancelada"].index(row['estado']),
-                            key=f"st_{row['id_cita']}"
-                        )
-                    with col_boton:
-                        st.write(" ") # Espacio para alinear
-                        if st.button("Guardar", key=f"btn_{row['id_cita']}"):
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_e, row['id_cita']))
-                            conn.commit()
-                            st.success("Actualizado")
-                            t_sleep.sleep(1)
-                            st.rerun()
-                            
+                st.warning(f"**Ocupado de {h_i} a {h_f}** | Paciente: {row['nombre']} (ID: {row['cedula']})")
+        else:
+            st.info("🎉 Todo el día está libre. No hay rangos ocupados.")
+
+        st.divider()
+        
     except Exception as e:
-        st.error(f"Error visualizando agenda: {e}")
+        st.error(f"Error en base de datos: {e}")
     finally:
         conn.close()
 
