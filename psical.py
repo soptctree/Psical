@@ -10,13 +10,12 @@ st.set_page_config(page_title="Psical - Gestión Clínica", layout="wide")
 def conectar_db():
     import pymysql
     return pymysql.connect(
-        host="gateway01.us-east-1.prod.aws.tidbcloud.com",
-        port=4000,
-        user="469gCJra1a7NKDL.root",
-        password="5EuBdxr4tEuzvzMp",
-        database="psical_db", # <--- Asegúrate que diga psical_db
-        autocommit=True,
-        ssl={'ca': '/etc/ssl/certs/ca-certificates.crt'} 
+        host="gateway01.us-east-1.prod.aws.tidbcloud.com", #
+        port=4000, #
+        user="469gCJra1a7NKDL.root", #
+        password="5EuBdxr4tEuzvzMp", #
+        database="psical_db", #
+        ssl={'ca': '/etc/ssl/certs/ca-certificates.crt'}
     )
 
 def obtener_pacientes():
