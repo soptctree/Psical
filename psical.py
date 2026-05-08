@@ -62,7 +62,11 @@ if menu == "Agenda Diaria":
         # --- MAPA DE DISPONIBILIDAD (Versión Responsiva) ---
         st.write("### 🕒 Mapa de Disponibilidad")
         horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
-        cols = st.columns(10)
+        
+        # Cambiamos a 5 columnas para que en celular se vea en dos filas de 5 
+        # y no una sola lista vertical larga.
+        num_cols = 5
+        cols = st.columns(num_cols)
         
         for i, h in enumerate(horas_dia):
             ocupado = False
@@ -73,9 +77,13 @@ if menu == "Agenda Diaria":
                     if h >= inicio and h < fin:
                         ocupado = True
                         break
-            with cols[i % 10]:
-                if ocupado: st.error(f"{h.strftime('%H:%M')}")
-                else: st.success(f"{h.strftime('%H:%M')}")
+            
+            # Usamos el residuo (%) de num_cols para distribuir las horas
+            with cols[i % num_cols]:
+                if ocupado: 
+                    st.error(f"{h.strftime('%H:%M')}")
+                else: 
+                    st.success(f"{h.strftime('%H:%M')}")
 
         st.divider()
         
