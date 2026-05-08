@@ -52,6 +52,61 @@ if st.session_state.rol is None:
             else:
                 st.error("Credenciales incorrectas")
     st.stop()
+def modulo_admin_usuarios():
+    st.title("⚙️ Panel de Administración Maestro")
+    st.info(f"Sesión iniciada como: {st.session_state.usuario_nom} (Administrador)")
+
+    conn = conectar_db()
+    try:
+        # 1. VISUALIZACIÓN DE USUARIOS
+        st.write("### 👥 Usuarios en el Sistema")
+        df_users = pd.read_sql("SELECT id_usuario, username, rol FROM usuarios", conn)
+        st.dataframe(df_users, use_container_width=True)
+        
+        st.divider()
+
+        # 2. GESTIÓN DE CREDENCIALES
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("### ➕ Registrar Nuevo")
+            with st.form("nuevo_user_form"):
+                n_user = st.text_input("Nombre de Usuario:")
+                n_pass = st.text_input("Contraseña:", type="password")
+                n_rol = st.selectbox("Asignar Rol:", ["Psicologo", "Admin"])
+                if st.form_submit_button("Crear Cuenta"):
+                    if n_user and n_pass:
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO usuarios (username, password, rol) VALUES (%s, %s, %s)", 
+                                     (n_user, n_pass, n_rol))
+                        conn.commit()
+                        st.success(f"Usuario {n_user} creado con éxito.")
+                        st.rerun()
+                    else:
+                        st.warning("Por favor rellena todos los campos.")
+
+        with col2:
+            st.write("### 🔑 Gestionar Contraseña")
+            with st.form("reset_pass_form"):
+                user_sel = st.selectbox("Seleccionar Usuario:", options=df_users['username'].tolist())
+                new_pass = st.text_input("Nueva Contraseña:", type="password")
+                if st.form_submit_button("Actualizar Clave"):
+                    if new_pass:
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE usuarios SET password = %s WHERE username = %s", 
+                                     (new_pass, user_sel))
+                        conn.commit()
+                        st.success(f"Clave de {user_sel} actualizada.")
+                    else:
+                        st.warning("Escribe una nueva contraseña.")
+                    
+    except Exception as e:
+        st.error(f"Error en panel admin: {e}")
+    finally:
+        if conn:
+            conn.close()
+            
+
 def obtener_pacientes():
     try:
         conn = conectar_db()
