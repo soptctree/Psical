@@ -9,7 +9,12 @@ st.set_page_config(page_title="Psical - Gestión Clínica", layout="wide")
 
 def conectar_db():
     return mysql.connector.connect(
-        host="localhost", user="root", password="", database="psical_db"
+        host="gateway01.us-east-1.prod.aws.tidbcloud.com",
+        port=4000,
+        user="469gCJra1a7NKDL.root",
+        password="5EuBdxr4tEuzvzMp",
+        database="psical_db",
+        autocommit=True
     )
 
 def obtener_pacientes():
