@@ -56,7 +56,6 @@ if menu == "Agenda Diaria":
     """
     try:
         df_todas = pd.read_sql(query, conn)
-        # Filtramos para el visual de disponibilidad
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
         # --- 1. MAPA DE DISPONIBILIDAD (Semáforo) ---
@@ -68,9 +67,10 @@ if menu == "Agenda Diaria":
             ocupado = False
             if not df_activas.empty:
                 for _, r in df_activas.iterrows():
-                    # AJUSTE SEGURO: Convertimos a string y luego a objeto time para evitar el "0 day"
-                    inicio = datetime.strptime(str(r['hora_inicio']), '%H:%M:%S').time() if len(str(r['hora_inicio'])) > 5 else r['hora_inicio']
-                    fin = datetime.strptime(str(r['hora_fin']), '%H:%M:%S').time() if len(str(r['hora_fin'])) > 5 else r['hora_fin']
+                    # SOLUCIÓN AL ERROR '0 days':
+                    # Si el dato es timedelta, lo sumamos a una fecha base para extraer solo la hora
+                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                     
                     if h >= inicio and h < fin:
                         ocupado = True
@@ -81,13 +81,16 @@ if menu == "Agenda Diaria":
 
         st.divider()
 
-        # --- 2. RANGOS OCUPADOS ---
+        # --- 2. RANGOS OCUPADOS (Cuadros Amarillos) ---
         if not df_activas.empty:
             st.write("### ⏳ Horarios Reservados")
             for _, row in df_activas.iterrows():
-                # AJUSTE SEGURO para el formato visual
-                h_i = datetime.strptime(str(row['hora_inicio']), '%H:%M:%S').time().strftime('%H:%M') if len(str(row['hora_inicio'])) > 5 else str(row['hora_inicio'])[:5]
-                h_f = datetime.strptime(str(row['hora_fin']), '%H:%M:%S').time().strftime('%H:%M') if len(str(row['hora_fin'])) > 5 else str(row['hora_fin'])[:5]
+                # Aplicamos la misma lógica de conversión para el visual
+                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                
+                h_i = h_i_obj.strftime('%H:%M')
+                h_f = h_f_obj.strftime('%H:%M')
                 
                 st.warning(f"**Ocupado de {h_i} a {h_f}** | Paciente: {row['nombre']} (ID: {row['cedula']})")
         else:
