@@ -19,18 +19,23 @@ def conectar_db():
     
 def validar_login(usuario, clave):
     try:
-        conn = conectar_db() # Ahora sí la encontrará
-        cursor = conn.cursor(dictionary=True)
+        conn = conectar_db()
+        cursor = conn.cursor() # Quitamos el argumento que daba error
         sql = "SELECT rol FROM usuarios WHERE username = %s AND password = %s"
         cursor.execute(sql, (usuario, clave))
-        resultado = cursor.fetchone()
-        return resultado['rol'] if resultado else None
+        resultado = cursor.fetchone() # Esto devuelve una tupla, ej: ('Admin',)
+        
+        if resultado:
+            return resultado[0] # Retornamos el primer elemento de la tupla (el rol)
+        return None
     except Exception as e:
         st.error(f"Error en login: {e}")
         return None
     finally:
-        if 'conn' in locals() and conn.is_connected():
+        # Verificamos que la conexión exista antes de intentar cerrarla
+        if 'conn' in locals() and conn:
             conn.close()
+            
 if "rol" not in st.session_state:
     st.session_state.rol = None
 
