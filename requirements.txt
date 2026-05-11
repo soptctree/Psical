@@ -1,3 +1,2 @@
-streamlit==1.55.0
-mysql-connector-python
-pandas==2.3.3
+pymysql
+pandas
